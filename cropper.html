@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>✂️ 素材裁剪器 · 阿清小屋工坊</title>
+<style>
+  :root {
+    --bg: #1a1822; --panel: #242130; --line: #3a3550;
+    --text: #e8e4f0; --dim: #9a93b0; --accent: #ffb454; --accent2: #7ec8e3;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.6 "PingFang SC", "Microsoft YaHei", sans-serif;
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; color: var(--accent); }
+  header .hint { color: var(--dim); font-size: 12px; }
+  main { flex: 1; display: flex; overflow: hidden; }
+  #stage {
+    flex: 1; overflow: auto; position: relative;
+    background:
+      repeating-conic-gradient(#2a2736 0% 25%, #232030 0% 50%) 0 0 / 24px 24px;
+  }
+  #stage.empty { display: flex; align-items: center; justify-content: center; }
+  #dropHint { color: var(--dim); text-align: center; font-size: 15px; pointer-events: none; }
+  #canvasWrap { position: relative; display: inline-block; }
+  canvas { display: block; image-rendering: pixelated; }
+  #overlay { position: absolute; left: 0; top: 0; cursor: crosshair; }
+  aside {
+    width: 300px; background: var(--panel); border-left: 1px solid var(--line);
+    padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
+  }
+  .box { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .box h3 { font-size: 13px; color: var(--accent2); margin-bottom: 8px; }
+  label { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 13px; }
+  select, input[type=text], input[type=number] {
+    background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 5px; padding: 4px 8px; font-size: 13px; width: 100%;
+  }
+  input[type=number] { width: 64px; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+  button {
+    background: var(--accent); color: #211a10; border: 0; border-radius: 6px;
+    padding: 7px 12px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  button.secondary { background: var(--line); color: var(--text); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  #preview {
+    background:
+      repeating-conic-gradient(#2a2736 0% 25%, #232030 0% 50%) 0 0 / 16px 16px;
+    border: 1px solid var(--line); border-radius: 6px;
+    min-height: 100px; display: flex; align-items: center; justify-content: center;
+    padding: 8px;
+  }
+  #preview canvas { image-rendering: pixelated; max-width: 100%; }
+  #selInfo { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #snippet {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+    font: 12px/1.5 ui-monospace, monospace; padding: 8px; color: var(--accent2);
+    word-break: break-all; user-select: all; white-space: pre-wrap;
+  }
+  #history { display: flex; flex-direction: column; gap: 6px; }
+  .hist-item {
+    display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
+  }
+  .hist-item img { image-rendering: pixelated; height: 32px; }
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: #211a10; padding: 8px 18px; border-radius: 20px;
+    font-weight: 600; opacity: 0; transition: opacity .25s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>✂️ 素材裁剪器</h1>
+  <label>缩放
+    <select id="zoomSel">
+      <option value="1">1×</option><option value="2">2×</option>
+      <option value="3" selected>3×</option><option value="4">4×</option>
+      <option value="6">6×</option><option value="8">8×</option>
+    </select>
+  </label>
+  <label>网格吸附
+    <select id="snapSel">
+      <option value="0">关</option><option value="16">16px</option>
+      <option value="32" selected>32px</option><option value="48">48px</option>
+      <option value="96">96px</option>
+    </select>
+  </label>
+  <label><input type="checkbox" id="gridChk" checked> 显示网格</label>
+  <button class="secondary" onclick="fileInput.click()">打开图片</button>
+  <span class="hint">把 png/jpg 拖进来也行 · 在图上拖框选中 · 方向键微调（Shift=调大小）</span>
+  <input type="file" id="fileInput" accept="image/*" hidden>
+</header>
+<main>
+  <div id="stage" class="empty">
+    <div id="dropHint">🖼️<br>把素材大图拖到这里<br><span style="font-size:12px">（图片只在你的浏览器里处理，不会上传）</span></div>
+    <div id="canvasWrap" hidden>
+      <canvas id="view"></canvas>
+      <canvas id="overlay"></canvas>
+    </div>
+  </div>
+  <aside>
+    <div class="box">
+      <h3>选区</h3>
+      <div id="selInfo">还没有选区</div>
+      <div id="preview" style="margin-top:8px"><span style="color:var(--dim);font-size:12px">预览</span></div>
+    </div>
+    <div class="box">
+      <h3>导出</h3>
+      <div class="row">
+        <input type="text" id="nameInput" placeholder="文件名（如 pianoBlack）">
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="scaleChk"> 缩放到</label>
+        <input type="number" id="scaleW" value="32" min="8" max="256"> px 宽
+      </div>
+      <div class="row">
+        <button id="dlBtn" disabled>⬇️ 下载 PNG</button>
+        <button id="copyBtn" class="secondary" disabled>复制 config 行</button>
+      </div>
+      <div id="snippet" hidden></div>
+    </div>
+    <div class="box">
+      <h3>本次已切 <span id="histCount" style="color:var(--accent)">0</span> 张</h3>
+      <div id="history"></div>
+    </div>
+  </aside>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const stage = document.getElementById('stage');
+const wrap = document.getElementById('canvasWrap');
+const view = document.getElementById('view');
+const overlay = document.getElementById('overlay');
+const vctx = view.getContext('2d');
+const octx = overlay.getContext('2d');
+const fileInput = document.getElementById('fileInput');
+const zoomSel = document.getElementById('zoomSel');
+const snapSel = document.getElementById('snapSel');
+const gridChk = document.getElementById('gridChk');
+const selInfo = document.getElementById('selInfo');
+const preview = document.getElementById('preview');
+const nameInput = document.getElementById('nameInput');
+const scaleChk = document.getElementById('scaleChk');
+const scaleW = document.getElementById('scaleW');
+const dlBtn = document.getElementById('dlBtn');
+const copyBtn = document.getElementById('copyBtn');
+const snippet = document.getElementById('snippet');
+const history = document.getElementById('history');
+const histCount = document.getElementById('histCount');
+const toast = document.getElementById('toast');
+
+let img = null;        // 原始 Image
+let zoom = 3;
+let sel = null;        // {x,y,w,h} 原图像素坐标
+let dragging = false, dragStart = null;
+let nCrops = 0;
+
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 1600);
+}
+
+function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const url = URL.createObjectURL(file);
+  const im = new Image();
+  im.onload = () => {
+    img = im; sel = null;
+    stage.classList.remove('empty');
+    document.getElementById('dropHint').hidden = true;
+    wrap.hidden = false;
+    render();
+    URL.revokeObjectURL(url);
+  };
+  im.src = url;
+}
+
+fileInput.onchange = e => loadFile(e.target.files[0]);
+stage.ondragover = e => e.preventDefault();
+stage.ondrop = e => { e.preventDefault(); loadFile(e.dataTransfer.files[0]); };
+
+function render() {
+  if (!img) return;
+  zoom = +zoomSel.value;
+  view.width = overlay.width = img.width * zoom;
+  view.height = overlay.height = img.height * zoom;
+  vctx.imageSmoothingEnabled = false;
+  vctx.clearRect(0, 0, view.width, view.height);
+  vctx.drawImage(img, 0, 0, view.width, view.height);
+  drawOverlay();
+}
+
+function drawOverlay() {
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  const snap = +snapSel.value;
+  if (gridChk.checked && snap > 0) {
+    octx.strokeStyle = 'rgba(255,180,84,.25)';
+    octx.lineWidth = 1;
+    for (let x = 0; x <= img.width; x += snap) {
+      octx.beginPath(); octx.moveTo(x*zoom+.5, 0); octx.lineTo(x*zoom+.5, overlay.height); octx.stroke();
+    }
+    for (let y = 0; y <= img.height; y += snap) {
+      octx.beginPath(); octx.moveTo(0, y*zoom+.5); octx.lineTo(overlay.width, y*zoom+.5); octx.stroke();
+    }
+  }
+  if (sel) {
+    octx.fillStyle = 'rgba(126,200,227,.15)';
+    octx.fillRect(sel.x*zoom, sel.y*zoom, sel.w*zoom, sel.h*zoom);
+    octx.strokeStyle = '#7ec8e3';
+    octx.lineWidth = 2;
+    octx.strokeRect(sel.x*zoom+1, sel.y*zoom+1, sel.w*zoom-2, sel.h*zoom-2);
+  }
+}
+
+function snapVal(v, grid, up) {
+  if (grid <= 0) return Math.round(v);
+  return (up ? Math.ceil(v / grid) : Math.floor(v / grid)) * grid;
+}
+
+function evtPos(e) {
+  const r = overlay.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / zoom, y: (e.clientY - r.top) / zoom };
+}
+
+overlay.onmousedown = e => {
+  if (!img) return;
+  dragging = true;
+  dragStart = evtPos(e);
+};
+overlay.onmousemove = e => {
+  if (!dragging) return;
+  const p = evtPos(e);
+  const grid = +snapSel.value;
+  let x0 = Math.min(dragStart.x, p.x), y0 = Math.min(dragStart.y, p.y);
+  let x1 = Math.max(dragStart.x, p.x), y1 = Math.max(dragStart.y, p.y);
+  x0 = Math.max(0, snapVal(x0, grid, false));
+  y0 = Math.max(0, snapVal(y0, grid, false));
+  x1 = Math.min(img.width, snapVal(x1, grid, true));
+  y1 = Math.min(img.height, snapVal(y1, grid, true));
+  if (x1 - x0 >= 1 && y1 - y0 >= 1) {
+    sel = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    updateSel();
+  }
+};
+window.onmouseup = () => { dragging = false; };
+
+window.addEventListener('keydown', e => {
+  if (!sel || !img) return;
+  if (document.activeElement === nameInput) return;
+  const grid = +snapSel.value || 1;
+  const d = { ArrowLeft: [-1,0], ArrowRight: [1,0], ArrowUp: [0,-1], ArrowDown: [0,1] }[e.key];
+  if (!d) return;
+  e.preventDefault();
+  if (e.shiftKey) {
+    sel.w = Math.max(grid, Math.min(img.width - sel.x, sel.w + d[0]*grid));
+    sel.h = Math.max(grid, Math.min(img.height - sel.y, sel.h + d[1]*grid));
+  } else {
+    sel.x = Math.max(0, Math.min(img.width - sel.w, sel.x + d[0]*grid));
+    sel.y = Math.max(0, Math.min(img.height - sel.h, sel.y + d[1]*grid));
+  }
+  updateSel();
+});
+
+function updateSel() {
+  drawOverlay();
+  if (!sel) return;
+  selInfo.textContent = `x:${sel.x} y:${sel.y}  ${sel.w}×${sel.h}px  （${(sel.w/32).toFixed(1)}×${(sel.h/32).toFixed(1)}格）`;
+  const c = document.createElement('canvas');
+  c.width = sel.w; c.height = sel.h;
+  c.getContext('2d').drawImage(img, sel.x, sel.y, sel.w, sel.h, 0, 0, sel.w, sel.h);
+  const scale = Math.min(4, Math.max(1, Math.floor(240 / sel.w)));
+  c.style.width = sel.w * scale + 'px';
+  preview.innerHTML = '';
+  preview.appendChild(c);
+  dlBtn.disabled = copyBtn.disabled = false;
+}
+
+function cropCanvas() {
+  const c = document.createElement('canvas');
+  if (scaleChk.checked) {
+    const tw = +scaleW.value;
+    const th = Math.round(sel.h * tw / sel.w);
+    c.width = tw; c.height = th;
+    const cx = c.getContext('2d');
+    cx.imageSmoothingEnabled = false;
+    cx.drawImage(img, sel.x, sel.y, sel.w, sel.h, 0, 0, tw, th);
+  } else {
+    c.width = sel.w; c.height = sel.h;
+    c.getContext('2d').drawImage(img, sel.x, sel.y, sel.w, sel.h, 0, 0, sel.w, sel.h);
+  }
+  return c;
+}
+
+dlBtn.onclick = () => {
+  if (!sel) return;
+  const name = (nameInput.value.trim() || 'sprite') + '.png';
+  const c = cropCanvas();
+  c.toBlob(blob => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  const h = document.createElement('div');
+  h.className = 'hist-item';
+  const thumb = document.createElement('img');
+  thumb.src = c.toDataURL();
+  h.appendChild(thumb);
+  h.appendChild(document.createTextNode(`${name} ${c.width}×${c.height}`));
+  history.prepend(h);
+  histCount.textContent = ++nCrops;
+  showToast(`已下载 ${name}`);
+  showSnippet(name.replace('.png',''), c);
+};
+
+copyBtn.onclick = () => {
+  const key = nameInput.value.trim() || 'sprite';
+  const c = cropCanvas();
+  showSnippet(key, c);
+  navigator.clipboard.writeText(snippetText(key)).then(() => showToast('已复制！发给阿清就行'));
+};
+
+function snippetText(key) {
+  return `${key}: 'assets/sprites/${key}.png',   // ${sel.w}×${sel.h}px 原图，摆位建议 w:${Math.max(1,Math.round(sel.w/32))} h:${Math.max(1,Math.round(sel.h/32))}`;
+}
+
+function showSnippet(key, c) {
+  snippet.hidden = false;
+  snippet.textContent = snippetText(key) +
+    `\n{ key: '${key}', c: ?, r: ?, w: ${Math.max(1,Math.round(c.width/32))}, h: ${Math.max(1,Math.round(c.height/32))} },`;
+}
+
+zoomSel.onchange = render;
+snapSel.onchange = drawOverlay;
+gridChk.onchange = drawOverlay;
+</script>
+</body>
+</html>

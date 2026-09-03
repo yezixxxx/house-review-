@@ -1,0 +1,392 @@
+<title>窗光 Demo</title>
+<style>
+:root {
+  --bg:      #16131f;
+  --surface: #1e1a2e;
+  --border:  #36304d;
+  --text:    #ddd6f0;
+  --muted:   #7a7090;
+  --accent:  #ffcc60;
+  --aglow:   rgba(255,204,96,0.15);
+  --track:   #2e2840;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Courier New', Courier, monospace;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 20px 32px;
+}
+h1 {
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 18px;
+}
+.canvas-wrap {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
+canvas { display: block; }
+.controls {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 28px;
+  width: 480px;
+}
+.ctrl { display: flex; flex-direction: column; gap: 7px; }
+.ctrl label {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+}
+.ctrl label span { color: var(--accent); font-variant-numeric: tabular-nums; }
+input[type=range] {
+  width: 100%;
+  -webkit-appearance: none;
+  height: 3px;
+  background: var(--track);
+  border-radius: 2px;
+  cursor: pointer;
+  outline: none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 0 3px var(--aglow);
+}
+.buttons {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  width: 480px;
+}
+button {
+  flex: 1;
+  padding: 8px 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+button.on  { border-color: var(--accent); color: var(--accent); background: var(--aglow); }
+.hint {
+  margin-top: 20px;
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-align: center;
+  line-height: 1.9;
+  max-width: 480px;
+}
+.hint code { color: var(--accent); opacity: 0.8; }
+</style>
+
+<h1>🪟 窗光 Demo</h1>
+<div class="canvas-wrap"><canvas id="c"></canvas></div>
+
+<div class="controls">
+  <div class="ctrl">
+    <label>亮度 α<span id="vA">0.30</span></label>
+    <input type="range" id="sA" min="4" max="75" value="30">
+  </div>
+  <div class="ctrl">
+    <label>半径 r<span id="vR">5 tiles</span></label>
+    <input type="range" id="sR" min="2" max="11" value="5">
+  </div>
+</div>
+
+<div class="buttons">
+  <button id="bW" class="on">窗光 ON</button>
+  <button id="bN">切夜晚</button>
+  <button id="bD">显示调试</button>
+</div>
+
+<div class="hint">
+  圆心锚在墙线 · <code>ctx.clip(indoorRect)</code> 截掉室外 · <code>globalCompositeOperation='lighter'</code> 叠加<br>
+  家具画在光照层下面，可以看到光打在不同物件上的效果
+</div>
+
+<script>
+const T = 32
+const COLS = 15, ROWS = 9
+const el = document.getElementById('c')
+const cx = el.getContext('2d')
+const DPR = Math.min(window.devicePixelRatio || 1, 2)
+el.style.width  = COLS * T + 'px'
+el.style.height = ROWS * T + 'px'
+el.width  = COLS * T * DPR
+el.height = ROWS * T * DPR
+cx.scale(DPR, DPR)
+
+const CW = COLS * T, CH = ROWS * T
+const IR = { x: T, y: T, w: 13*T, h: 7*T }
+
+const NY = IR.y, SY = IR.y + IR.h
+// 窗户圆心（贴在北/南墙线上）
+const WINS = [
+  { cx: 2.5*T, cy: NY }, { cx: 5.5*T, cy: NY },
+  { cx: 8.5*T, cy: NY }, { cx: 12*T,  cy: NY },
+  { cx: 4*T,   cy: SY }, { cx: 8*T,   cy: SY }, { cx: 11.5*T, cy: SY },
+]
+// 北墙窗框位置（用于绘制窗框）
+const N_WINS = WINS.filter(w => w.cy === NY)
+const S_WINS = WINS.filter(w => w.cy === SY)
+
+let alpha = 0.30, radius = 5*T, winOn = true, night = false, dbg = false
+
+// ── helpers ──────────────────────────────────────────────────────
+
+function rect(x, y, w, h, color) {
+  cx.fillStyle = color; cx.fillRect(x, y, w, h)
+}
+
+function shadow(x, y, w, h, color) {
+  cx.fillStyle = color; cx.fillRect(x, y, w, h)
+}
+
+// ── 窗框 ─────────────────────────────────────────────────────────
+function drawWindowFrames() {
+  const ww = T * 1.6, wh = T * 0.72  // 窗宽 × 高
+
+  // 北墙窗（贴着室内顶边，开口朝下）
+  for (const w of N_WINS) {
+    const x = w.cx - ww/2, y = IR.y - T + T * 0.18
+    // 天空
+    cx.fillStyle = night ? '#0a1020' : '#9ac8e8'
+    cx.fillRect(x, y, ww, wh)
+    // 窗框
+    cx.strokeStyle = '#2a1a08'; cx.lineWidth = 2.5
+    cx.strokeRect(x+1, y+1, ww-2, wh-2)
+    // 竖格
+    cx.beginPath(); cx.moveTo(w.cx, y+1); cx.lineTo(w.cx, y+wh-1); cx.stroke()
+  }
+
+  // 南墙窗（开口朝上，近景视角稍大）
+  for (const w of S_WINS) {
+    const x = w.cx - ww/2, y = IR.y + IR.h + T * 0.1
+    cx.fillStyle = night ? '#0a1020' : '#9ac8e8'
+    cx.fillRect(x, y, ww, wh)
+    cx.strokeStyle = '#2a1a08'; cx.lineWidth = 2.5
+    cx.strokeRect(x+1, y+1, ww-2, wh-2)
+    cx.beginPath(); cx.moveTo(w.cx, y+1); cx.lineTo(w.cx, y+wh-1); cx.stroke()
+  }
+}
+
+// ── 家具 ─────────────────────────────────────────────────────────
+function drawFurniture() {
+  const ix = IR.x, iy = IR.y
+
+  // 地毯（中央）
+  cx.fillStyle = '#6a2828'
+  cx.fillRect(ix+3.2*T, iy+1.8*T, 6.6*T, 3.4*T)
+  cx.fillStyle = '#7a3838'
+  cx.fillRect(ix+3.2*T+5, iy+1.8*T+5, 6.6*T-10, 3.4*T-10)
+  // 地毯花纹（菱形）
+  cx.strokeStyle = '#8a4040'; cx.lineWidth = 1.5
+  const rcx = ix+6.5*T, rcy = iy+3.5*T
+  cx.beginPath()
+  cx.moveTo(rcx, rcy-22); cx.lineTo(rcx+32, rcy)
+  cx.lineTo(rcx, rcy+22); cx.lineTo(rcx-32, rcy)
+  cx.closePath(); cx.stroke()
+  cx.beginPath()
+  cx.moveTo(rcx, rcy-10); cx.lineTo(rcx+14, rcy)
+  cx.lineTo(rcx, rcy+10); cx.lineTo(rcx-14, rcy)
+  cx.closePath(); cx.stroke()
+
+  // 书架（西墙贴边）
+  rect(ix+2, iy+T*0.8, T-4, T*4.5, '#3a2008')
+  // 书
+  const books = ['#d04040','#4070d0','#40b060','#d08030','#9040b0','#30a0b0','#c06060','#5090e0']
+  for (let row = 0; row < 4; row++) {
+    let bx = ix + 4
+    for (let i = 0; i < 8; i++) {
+      const bw = 3 + (i % 3)
+      cx.fillStyle = books[(i + row * 3) % books.length]
+      cx.fillRect(bx, iy + T*0.9 + row * (T*0.95) + 3, bw, T*0.7)
+      bx += bw + 1
+      if (bx > ix + T - 4) break
+    }
+  }
+  // 书架格板
+  cx.fillStyle = '#2a1400'
+  for (let row = 1; row < 5; row++)
+    cx.fillRect(ix+2, iy+T*0.8 + row*T*0.95, T-4, 3)
+
+  // 桌子（北墙右侧，两窗之间）
+  rect(ix+9.5*T, iy+T*0.35, 2.5*T, T*1.3, '#a07848')
+  rect(ix+9.5*T+4, iy+T*0.35+3, 2.5*T-8, 5, 'rgba(255,255,255,0.12)')  // 高光
+  rect(ix+9.5*T+4, iy+T*0.35+T*1.3, 7, T*0.4, '#6a4820')   // 桌腿L
+  rect(ix+9.5*T+2.5*T-11, iy+T*0.35+T*1.3, 7, T*0.4, '#6a4820')  // 桌腿R
+  // 桌上小台灯
+  rect(ix+10.5*T, iy+T*0.35-T*0.4, 6, T*0.4, '#888')  // 灯柱
+  cx.fillStyle = '#ffe890'; cx.beginPath()
+  cx.arc(ix+10.5*T+3, iy+T*0.35-T*0.4, 8, 0, Math.PI*2); cx.fill()
+
+  // 椅子（桌前）
+  rect(ix+10*T, iy+T*1.9, T*0.9, T*0.7, '#7a5090')
+  rect(ix+10*T, iy+T*1.9-T*0.35, T*0.9, T*0.38, '#8a60a0')  // 靠背
+  rect(ix+10*T+3, iy+T*2.6, 6, 8, '#5a3070')  // 腿L
+  rect(ix+10*T+T*0.9-9, iy+T*2.6, 6, 8, '#5a3070')  // 腿R
+
+  // 沙发（南墙，3座）
+  const sx = ix+3.5*T, sy = iy+IR.h-T*1.8
+  rect(sx, sy, 6*T, T*1.5, '#4a3870')          // 座垫
+  rect(sx, sy-T*0.5, 6*T, T*0.55, '#5a4880')   // 靠背
+  rect(sx, sy-T*0.5, T*0.5, T*2, '#3a2858')    // 左扶手
+  rect(sx+6*T-T*0.5, sy-T*0.5, T*0.5, T*2, '#3a2858')  // 右扶手
+  // 坐垫分割线
+  cx.fillStyle = 'rgba(0,0,0,0.2)'
+  cx.fillRect(sx+2*T, sy, 3, T*1.5)
+  cx.fillRect(sx+4*T, sy, 3, T*1.5)
+  // 高光
+  cx.fillStyle = 'rgba(255,255,255,0.07)'
+  cx.fillRect(sx+T*0.5+4, sy+4, 6*T-T-8, 7)
+
+  // 茶几（地毯中央）
+  rect(ix+5.5*T, iy+3*T, T*2, T*0.8, '#b09060')
+  rect(ix+5.5*T+3, iy+3*T+2, T*2-6, 4, 'rgba(255,255,255,0.15)')
+  // 茶几上的茶杯
+  cx.fillStyle = '#e0e0e0'
+  cx.beginPath(); cx.arc(ix+6.5*T, iy+3.4*T, 5, 0, Math.PI*2); cx.fill()
+  cx.fillStyle = '#c88040'
+  cx.beginPath(); cx.arc(ix+6.5*T, iy+3.4*T, 3, 0, Math.PI*2); cx.fill()
+
+  // 鱼缸（东北角）
+  rect(ix+11.2*T, iy+T*0.3, T*1.5, T, '#405878')   // 缸框
+  cx.fillStyle = 'rgba(60,150,220,0.4)'
+  cx.fillRect(ix+11.2*T+3, iy+T*0.3+3, T*1.5-6, T-6)
+  cx.fillStyle = 'rgba(255,255,255,0.28)'
+  cx.fillRect(ix+11.2*T+4, iy+T*0.3+4, T*1.5-8, 4)  // 水面
+  // 气泡
+  cx.fillStyle = 'rgba(255,255,255,0.55)'
+  ;[[8,14],[18,9],[26,16]].forEach(([bx,by]) => {
+    cx.beginPath()
+    cx.arc(ix+11.2*T+bx, iy+T*0.3+by, 2, 0, Math.PI*2)
+    cx.fill()
+  })
+  // 底座
+  rect(ix+11*T, iy+T*1.3, T*2, T*0.18, '#606060')
+}
+
+// ── main draw ────────────────────────────────────────────────────
+function draw() {
+  cx.clearRect(0, 0, CW, CH)
+
+  // 1. 室外
+  cx.fillStyle = night ? '#0c1510' : '#4a7a40'
+  cx.fillRect(0, 0, CW, CH)
+
+  // 2. 地板
+  cx.fillStyle = night ? '#5a3010' : '#c8a060'
+  cx.fillRect(IR.x, IR.y, IR.w, IR.h)
+  cx.strokeStyle = night ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.07)'
+  cx.lineWidth = 1
+  for (let y = IR.y + T; y < IR.y + IR.h; y += T * 0.75) {
+    cx.beginPath(); cx.moveTo(IR.x, y); cx.lineTo(IR.x + IR.w, y); cx.stroke()
+  }
+
+  // 3. 墙
+  rect(IR.x-T, IR.y-T, IR.w+2*T, T, '#50381a')      // north
+  rect(IR.x-T, IR.y+IR.h, IR.w+2*T, T, '#7a5a28')   // south
+  rect(IR.x-T, IR.y-T, T, IR.h+2*T, '#5a4020')      // west
+  rect(IR.x+IR.w, IR.y-T, T, IR.h+2*T, '#5a4020')   // east
+
+  // 4. 窗框
+  drawWindowFrames()
+
+  // 5. 北墙室内阴影
+  const sh = cx.createLinearGradient(0, IR.y, 0, IR.y + T * 1.5)
+  sh.addColorStop(0, 'rgba(0,0,0,0.28)')
+  sh.addColorStop(1, 'rgba(0,0,0,0)')
+  cx.fillStyle = sh; cx.fillRect(IR.x, IR.y, IR.w, T * 1.5)
+
+  // 6. 家具（光照层下面）
+  drawFurniture()
+
+  // 7. 窗光（ADD blend，clip 到室内）
+  if (winOn) {
+    cx.save()
+    cx.beginPath(); cx.rect(IR.x, IR.y, IR.w, IR.h); cx.clip()
+    cx.globalCompositeOperation = 'lighter'
+    const [r, g, b] = night ? [100, 120, 255] : [255, 210, 70]
+    for (const w of WINS) {
+      const g2 = cx.createRadialGradient(w.cx, w.cy, 1, w.cx, w.cy, radius)
+      g2.addColorStop(0,    `rgba(${r},${g},${b},${(alpha*.90).toFixed(3)})`)
+      g2.addColorStop(0.4,  `rgba(${r},${g},${b},${(alpha*.38).toFixed(3)})`)
+      g2.addColorStop(0.75, `rgba(${r},${g},${b},${(alpha*.06).toFixed(3)})`)
+      g2.addColorStop(1,    `rgba(${r},${g},${b},0)`)
+      cx.fillStyle = g2
+      cx.fillRect(w.cx - radius, w.cy - radius, radius*2, radius*2)
+    }
+    cx.restore()
+  }
+
+  // 8. 调试
+  if (dbg) {
+    cx.save()
+    cx.setLineDash([4,4])
+    cx.strokeStyle = 'rgba(68,153,255,0.55)'; cx.lineWidth = 1
+    cx.strokeRect(IR.x+.5, IR.y+.5, IR.w-1, IR.h-1)
+    cx.setLineDash([])
+    for (const w of WINS) {
+      cx.fillStyle = 'rgba(68,255,136,0.9)'
+      cx.beginPath(); cx.arc(w.cx, w.cy, 3, 0, Math.PI*2); cx.fill()
+      cx.strokeStyle = 'rgba(68,255,136,0.2)'; cx.lineWidth = 1
+      cx.setLineDash([2,5])
+      cx.beginPath(); cx.arc(w.cx, w.cy, radius, 0, Math.PI*2); cx.stroke()
+      cx.setLineDash([])
+    }
+    cx.restore()
+  }
+}
+
+// ── controls ─────────────────────────────────────────────────────
+document.getElementById('sA').addEventListener('input', e => {
+  alpha = e.target.value / 100
+  document.getElementById('vA').textContent = alpha.toFixed(2)
+  draw()
+})
+document.getElementById('sR').addEventListener('input', e => {
+  radius = parseInt(e.target.value) * T
+  document.getElementById('vR').textContent = e.target.value + ' tiles'
+  draw()
+})
+const bW = document.getElementById('bW')
+bW.addEventListener('click', () => {
+  winOn = !winOn; bW.textContent = winOn ? '窗光 ON' : '窗光 OFF'
+  bW.classList.toggle('on', winOn); draw()
+})
+const bN = document.getElementById('bN')
+bN.addEventListener('click', () => {
+  night = !night; bN.textContent = night ? '切白天' : '切夜晚'
+  bN.classList.toggle('on', night); draw()
+})
+const bD = document.getElementById('bD')
+bD.addEventListener('click', () => {
+  dbg = !dbg; bD.textContent = dbg ? '隐藏调试' : '显示调试'
+  bD.classList.toggle('on', dbg); draw()
+})
+
+draw()
+</script>

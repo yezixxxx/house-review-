@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>晚安小螃蟹 · Goodnight Clawd</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#E8E5E0;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:'Courier New',monospace;overflow:hidden}
+  canvas{image-rendering:pixelated;image-rendering:crisp-edges;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.08)}
+  .info{color:#999;font-size:11px;margin-top:10px;letter-spacing:1px}
+</style>
+</head>
+<body>
+<canvas id="c" width="720" height="720"></canvas>
+<div class="info" id="info"></div>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+
+const P={
+  bg:'#F9F7F4',dot:'#E0DDD8',
+  sd:'#333',sm:'#888',sl:'#BBB',
+  body:'#CD6E58',eye:'#000',
+  w:'#FFF',blush:'#FAC8D8',pink:'#F06090',pinkDeep:'#C84060',
+  lampShade:'#FF8C42',lampGlow:'#FFD9A0',lampBase:'#8A6A4F',lampDim:'#B25E2A',
+  cap:'#5C6BC0',capDark:'#4A57A3',
+};
+
+const PX=20,GW=36,GH=36;
+function px(x,y,c){ctx.fillStyle=c;ctx.fillRect(x*PX,y*PX,PX,PX)}
+
+const BODY=[
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
+  [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
+  [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
+  [0,0,0,1,0,1,0,0,1,0,1,0,0,0],
+  [0,0,0,1,0,1,0,0,1,0,1,0,0,0]
+];
+const EL={x:4,y:1},ER={x:9,y:1};
+const EYES={forward:{dl:0,dr:0,dy:0},right:{dl:1,dr:1,dy:0},left:{dl:-1,dr:-1,dy:0},down:{dl:0,dr:0,dy:1},blink:null};
+const HEART=[[1,0,1],[1,1,1],[0,1,0]];
+const STARS=[
+  [4,3,0],[14,2,0],[27,1,0],[31,3,1],[6,7,0],[19,5,2],[24,6,1],
+  [9,10,0],[2,13,0],[33,8,0],[29,12,0],[7,16,1],[3,20,0],[30,18,1],
+  [1,25,0],[33,24,0],[5,30,2],[28,28,1],[15,9,2],[21,14,1]
+];
+
+function drawBg(){
+  ctx.fillStyle=P.bg;ctx.fillRect(0,0,720,720);
+  for(let y=1;y<GH;y+=2)for(let x=1;x<GW;x+=2){
+    ctx.fillStyle=P.dot;ctx.beginPath();ctx.arc(x*PX+10,y*PX+10,2,0,6.28);ctx.fill();
+  }
+}
+function drawStars(f){
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  for(const[x,y,t]of STARS){
+    const tw=Math.sin(f*.08+x*.5+y*.3);
+    ctx.fillStyle=t===0?(tw>0?P.sd:P.sm):t===1?(tw>.3?P.sm:P.sl):(tw>0?P.sl:P.dot);
+    ctx.font=`bold ${t===0?14:10}px serif`;
+    ctx.fillText('✳',x*PX+10,y*PX+10);
+  }
+}
+function drawClawd(ox,oy,eyes='forward'){
+  for(let r=0;r<8;r++)for(let c=0;c<14;c++)if(BODY[r][c])px(ox+c,oy+r,P.body);
+  const e=EYES[eyes];
+  if(e){px(ox+EL.x+e.dl,oy+EL.y+e.dy,P.eye);px(ox+ER.x+e.dr,oy+ER.y+e.dy,P.eye)}
+}
+function drawBlush(ox,oy,a){ctx.globalAlpha=a;px(ox+3,oy+2,P.blush);px(ox+10,oy+2,P.blush);ctx.globalAlpha=1}
+function drawZzz(ox,oy,t){
+  ctx.globalAlpha=Math.sin(t*3)*.5+.5;ctx.fillStyle=P.sm;ctx.font='bold 14px Courier New';ctx.textAlign='left';
+  ctx.fillText('z',(ox+14)*PX,(oy-1)*PX);ctx.fillText('Z',(ox+15)*PX,(oy-3)*PX);ctx.globalAlpha=1;
+}
+function drawClawdWave(ox,oy,eyes,side='right'){
+  drawClawd(ox,oy,eyes);
+  if(side==='right'){px(ox+13,oy+1,P.body);px(ox+14,oy,P.body)}
+  else{px(ox+0,oy+1,P.body);px(ox-1,oy,P.body)}
+}
+function drawBubble(bx,by,text){
+  const tw=text.length+2;
+  for(let y=0;y<3;y++)for(let x=0;x<tw;x++){
+    if((y===0||y===2)&&(x===0||x===tw-1))continue;
+    px(bx+x,by+y,(y===0||y===2||x===0||x===tw-1)?P.sm:P.w);
+  }
+  px(bx+1,by+3,P.sm);ctx.fillStyle=P.sd;ctx.font='bold 16px Courier New';ctx.textAlign='left';ctx.textBaseline='top';
+  ctx.fillText(text,(bx+1)*PX+3,by*PX+11);
+}
+
+let particles=[];
+function addP(x,y,c){particles.push({x,y,vx:(Math.random()-.5)*.8,vy:-Math.random()*.8-.3,life:1,c})}
+function tickP(){
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];p.x+=p.vx;p.y+=p.vy;p.vy+=.04;p.life-=.025;
+    if(p.life<=0){particles.splice(i,1);continue}
+    if(p.life>.15)px(Math.round(p.x),Math.round(p.y),p.c);
+  }
+}
+
+function easeOut(t){return 1-Math.pow(1-t,3)}
+function easeInOut(t){return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2}
+function lerp(a,b,t){return a+(b-a)*t}
+
+// ═══ YOUR ANIMATION HERE ════════════════════════════
+const FPS=30, DUR=3, TOTAL=FPS*DUR;
+
+// 睡帽（歪向右边，白绒球垂下来）
+function drawCap(ox,oy){
+  for(let x=3;x<=10;x++)px(ox+x,oy-1,P.cap);
+  for(let x=4;x<=9;x++)px(ox+x,oy-2,x>7?P.capDark:P.cap);
+  px(ox+6,oy-3,P.cap);px(ox+7,oy-3,P.cap);
+  px(ox+8,oy-3,P.capDark);px(ox+9,oy-3,P.capDark);
+  px(ox+10,oy-2,P.capDark);
+  px(ox+11,oy-1,P.w); // 绒球
+}
+
+// 床头小台灯 7×9（乌鸦先生的灯同款暖橘）
+function drawLamp(lx,ly,bright){
+  const shade=bright>0.4?P.lampShade:P.lampDim;
+  for(let x=2;x<=4;x++)px(lx+x,ly,shade);
+  for(let x=1;x<=5;x++)px(lx+x,ly+1,shade);
+  for(let x=1;x<=5;x++)px(lx+x,ly+2,x>=2&&x<=4&&bright>0.4?P.lampGlow:shade);
+  for(let x=0;x<=6;x++)px(lx+x,ly+3,shade);
+  px(lx+3,ly+4,P.lampBase);px(lx+3,ly+5,P.lampBase);px(lx+3,ly+6,P.lampBase);
+  for(let x=2;x<=4;x++)px(lx+x,ly+7,P.lampBase);
+  for(let x=1;x<=5;x++)px(lx+x,ly+8,P.lampBase);
+}
+
+// 暖光晕（画在暗幕之上，永远留一点余晖）
+function drawGlow(cxp,cyp,bright){
+  const r=60+220*bright;
+  const g=ctx.createRadialGradient(cxp,cyp,10,cxp,cyp,r);
+  g.addColorStop(0,`rgba(255,190,110,${0.30+0.28*bright})`);
+  g.addColorStop(1,'rgba(255,190,110,0)');
+  ctx.fillStyle=g;ctx.beginPath();ctx.arc(cxp,cyp,r,0,6.28);ctx.fill();
+}
+
+function getPhase(t){
+  if(t<0.33) return {ph:'cozy', pt:t/0.33};          // 灯亮着，困困地眨眼
+  if(t<0.52) return {ph:'yawn', pt:(t-0.33)/0.19};   // 打哈欠（伸展→缩回）
+  if(t<0.72) return {ph:'dim',  pt:(t-0.52)/0.20};   // 伸钳子拨暗灯
+  return       {ph:'night',pt:(t-0.72)/0.28};        // 夜：余晖+晚安气泡
+}
+
+const CX=8, CY=16, LX=22, LY=15;
+
+function render(f){
+  const t=f/TOTAL, {ph,pt}=getPhase(t);
+  drawBg();
+
+  // 灯的亮度
+  let bright=1;
+  if(ph==='dim') bright=1-easeInOut(pt)*0.85;
+  if(ph==='night') bright=0.15;
+
+  drawStars(f);
+  drawLamp(LX,LY,bright);
+
+  // Clawd 本体
+  const breath=Math.round(Math.sin(f*0.12)*0.5);
+  let cy=CY+breath, eyes='forward';
+
+  if(ph==='cozy'){
+    eyes = (f%40<8)?'blink':'down';               // 困困地慢眨眼
+    drawClawd(CX,cy,eyes);
+    drawBlush(CX,cy,0.4);
+  } else if(ph==='yawn'){
+    const stretch = pt<0.5 ? -1 : 1;              // 先伸展后缩成一团
+    eyes='blink';
+    drawClawd(CX,cy+stretch,eyes);
+    if(f%5===0) addP(CX+12,cy-1,P.sl);            // 哈欠的小气泡
+    drawBlush(CX,cy+stretch,0.5);
+  } else if(ph==='dim'){
+    eyes='right';                                  // 看向灯
+    drawClawdWave(CX,cy,eyes,'right');             // 伸钳子去拨
+    px(CX+15,cy,P.body);                           // 钳尖再够一格,碰到灯座
+  } else {
+    eyes='blink';                                  // 闭眼睡了
+    drawClawd(CX,cy,eyes);
+  }
+  drawCap(CX,cy+(ph==='yawn'?(pt<0.5?-1:1):0));
+
+  tickP();
+
+  // 夜幕（跟着灯暗下来）
+  const dark=(1-bright)*0.72;
+  if(dark>0.01){
+    ctx.fillStyle=`rgba(16,12,36,${dark})`;
+    ctx.fillRect(0,0,720,720);
+    drawStars(f);                                  // 星星浮到夜幕上,更亮了
+  }
+
+  // 灯罩中心的暖光晕(永远有余晖)
+  drawGlow((LX+3)*PX+10,(LY+2)*PX,bright);
+
+  // 晚安气泡
+  if(ph==='night'&&pt>0.15){
+    drawBubble(11,8,'晚安🌙');
+    drawZzz(CX,cy,t*6);
+  }
+}
+// ═══ LOOP (do not modify) ═══════════════════════════
+let st=null;
+function loop(ts){
+  if(!st)st=ts;const el=(ts-st)/1000,lt=el%DUR,f=Math.floor(lt*FPS);
+  if(lt<.05)particles=[];render(f);
+  document.getElementById('info').textContent=`晚安小螃蟹 — ${lt.toFixed(1)}s/${DUR}s`;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
